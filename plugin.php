@@ -11,7 +11,7 @@
 global $App;
 $App->set_action( 'install', 'feed_install' );
 $App->set_action( 'uninstall', 'feed_uninstall' );
-$App->set_action( array( 'create_success', 'update_success', 'delete_success', 'generate_feed' ), 'generate_feed' );
+$App->set_action( [ 'create_success', 'update_success', 'delete_success', 'generate_feed' ], 'generate_feed' );
 $App->set_action( 'site_head', 'feed_head' );
 $App->set_action( 'admin', 'feed_admin' );
 
@@ -23,8 +23,10 @@ $App->set_action( 'admin', 'feed_admin' );
 function feed_install( string $plugin ): void {
   global $App;
   if ( 'feed' === $plugin ) {
-    $App->set( 5, 'feed' );
-    generate_feed();
+    $config = array();
+    $config[ 'max' ] = 5;
+    $config[ 'delete' ] = false;
+    $App->set( $config, 'feed' );
   }
 }
 
@@ -36,6 +38,13 @@ function feed_install( string $plugin ): void {
 function feed_uninstall( string $plugin ): void {
   global $App;
   if ( 'feed' === $plugin ) {
+    $config = $App->get( 'feed' );
+    if ( $config[ 'delete' ] ) {
+      $file = $App->root( 'feed.xml' );
+      if ( is_file( $file ) ) {
+        unlink( $file );
+      }
+    }
     $App->unset( 'feed' );
   }
 }
@@ -67,16 +76,15 @@ function feed_get( string $index, bool $esc = true ): string {
  * @return string
  */
 function feed_head(): string {
-  $html = '<link rel="alternate" type="application/rss+xml" title="%s Feed" href="%sfeed.xml">';
-  return sprintf( $html, feed_get( 'title' ), feed_get( 'url' ) );
+  $format = '<link rel="alternate" type="application/rss+xml" title="%s Feed" href="%sfeed.xml">';
+  return sprintf( $format, feed_get( 'title' ), feed_get( 'url' ) );
 }
 
 /**
  * Feed posts
- * @param ?int $max
  * @return array
  */
-function feed_posts( ?int $max = null ): array {
+function feed_posts(): array {
   global $App;
   $posts = array();
   $pages = $App->data()[ 'pages' ];
@@ -85,7 +93,7 @@ function feed_posts( ?int $max = null ): array {
       $posts[ $slug ] = $p;
     }
   }
-  $max ??= $App->get( 'feed' );
+  $max = $App->get( 'feed' )[ 'max' ];
   return array_slice( $posts, 0, $max, true );
 }
 
@@ -141,19 +149,27 @@ function feed_admin(): void {
   global $App, $layout, $page;
   switch ( $page ) {
     case 'feed':
+      $config = $App->get( 'feed' );
       $layout[ 'title' ] = 'Feed';
       $layout[ 'content' ] = '
       <form action="' . $App->admin_url( '?page=feed', true ) . '" method="post">
-        <label for="feed" class="ss-label">Number of items to display <span class="ss-red">*</span></label>
-        <input type="number" id="feed" name="feed" min="1" value="' . $App->get( 'feed' ) . '" class="ss-input ss-mobile ss-w-6 ss-mx-auto" required>
-        <p class="ss-small ss-gray ss-mb-5">This is the maximum number of posts to show in the feed.</p>
+        <label for="max" class="ss-label">Maximum Number of Posts in Feed <span class="ss-red">*</span></label>
+        <input type="number" id="max" name="max" min="1" value="' . $config[ 'max' ] . '" class="ss-input ss-mobile ss-w-6 ss-mx-auto" required>
+        <p class="ss-small ss-gray ss-mb-5">Use this field to specify the maximum number of posts you want to display in the feed.</p>
+        <label for="delete" class="ss-label">Delete Feed on Uninstall</label>
+        <select id="delete" name="delete" class="ss-select ss-mobile ss-w-6 ss-mx-auto">
+          <option value="true"' . ( $config[ 'delete' ] ? ' selected' : '' ) . '>Yes</option>
+          <option value="false"' . ( ! $config[ 'delete' ] ? ' selected' : '' ) . '>No</option>
+        </select>
+        <p class="ss-small ss-gray ss-mb-5">This option determines whether the generated feed should be deleted or kept when the plugin is uninstalled.</p>
         <input type="hidden" name="token" value="' . $App->token() . '">
         <input type="submit" name="save" value="Save" class="ss-btn ss-mobile ss-w-5">
       </form>';
       if ( isset( $_POST[ 'save' ] ) ) {
         $App->auth();
-        $feed = ( $_POST[ 'feed' ] ?? 1 );
-        if ( $App->set( $feed, 'feed' ) ) {
+        $config[ 'max' ] = ( $_POST[ 'max' ] ?? 1 );
+        $config[ 'delete' ] = filter_input( INPUT_POST, 'delete', FILTER_VALIDATE_BOOL );
+        if ( $App->set( $config, 'feed' ) ) {
           $App->alert( 'Settings saved successfully.', 'success' );
           $App->go( $App->admin_url( '?page=feed' ) );
         }
